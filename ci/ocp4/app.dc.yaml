@@ -1,0 +1,162 @@
+---
+kind: Template
+apiVersion: template.openshift.io/v1
+metadata:
+  name: bcgov-baserow-app-dc
+parameters:
+  # - description: The OpenShift Namespace where the ImageStream resides.
+  #   displayName: Namespace
+  #   name: IS_NAMESPACE
+  #   value: acf456-dev
+  # - description: The OpenShift ImageStream name.
+  #   displayName: Image Stream
+  #   name: IS_NAME
+  #   value: baserow-bcgov
+  - description: Version of BaseRow app to be used (e.g. 1.13.0).
+    displayName: Version of BaseRow
+    name: IMAGE_TAG
+    value: latest
+  - description: The short-name of the Survey Service, lower-case with hyphen.
+    displayName: BaseRow Acronym
+    name: APP_NAME
+    required: true
+    value: test
+  - name: DOCKER_REGISTRY
+    value: "artifacts.developer.gov.bc.ca/docker-remote"    
+    required: true
+  - name: CPU_LIMIT
+    value: "200m"
+  - name: MEMORY_LIMIT
+    value: "512Mi"
+  - name: CPU_REQUEST
+    value: "50m"
+  - name: MEMORY_REQUEST
+    value: "200Mi"
+objects:
+  - apiVersion: v1
+    kind: ImageStream
+    metadata:
+      labels:
+        app: "${APP_NAME}-baserow"
+      name: "${APP_NAME}-baserow-is"
+    spec:
+      lookupPolicy:
+        local: false
+      tags:
+        - name: ${IMAGE_TAG}
+          from:
+            kind: DockerImage
+            name: ${DOCKER_REGISTRY}/baserow/baserow:1.13.0
+          pullSecret:
+            name: docker-pull-passthru            
+          referencePolicy:
+            type: Local
+  - kind: DeploymentConfig
+    apiVersion: v1
+    metadata:
+      name: "${APP_NAME}-baserow-dc"
+      generation: 1
+      labels:
+        app: "${APP_NAME}-baserow"
+      annotations: {}
+    spec:
+      strategy:
+        type: Rolling
+        rollingParams:
+          updatePeriodSeconds: 1
+          intervalSeconds: 1
+          timeoutSeconds: 600
+          maxUnavailable: 25%
+          maxSurge: 25%
+        resources: {}
+        activeDeadlineSeconds: 21600
+      triggers:
+        - type: ConfigChange
+        - type: ImageChange
+          imageChangeParams:
+            automatic: true
+            containerNames:
+              - "${APP_NAME}-baserow-app"
+            from:
+              kind: ImageStreamTag
+              name: ${APP_NAME}-baserow-is:${IMAGE_TAG}
+      replicas: 1
+      revisionHistoryLimit: 10
+      test: false
+      selector:
+        app: "${APP_NAME}-baserow"
+        deploymentconfig: "${APP_NAME}-baserow-app"
+      template:
+        metadata:
+          labels:
+            app: "${APP_NAME}-baserow"
+            deploymentconfig: "${APP_NAME}-baserow-app"
+          annotations: {}
+        spec:
+          containers:
+            - name: "${APP_NAME}-baserow-app"
+              image: " "
+              ports:
+                - containerPort: 8080
+                  protocol: TCP
+                - containerPort: 8443
+                  protocol: TCP
+              env:
+                - name: DB_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: "${APP_NAME}-baserow-postgresql"
+                      key: database-user
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: "${APP_NAME}-baserow-postgresql"
+                      key: database-password
+                - name: DB_NAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: "${APP_NAME}-baserow-postgresql"
+                      key: database-name
+                - name: DB_HOST
+                  value: "${APP_NAME}-baserow-postgresql"
+                - name: DB_PORT
+                  value: "5432"
+                - name: DATABASE_URL
+                  value: postgresql://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)
+                - name: BASEROW_PUBLIC_URL
+                  value: "https://${APP_NAME}-baserow-url"
+              resources:
+                limits:
+                  cpu: "${CPU_LIMIT}"
+                  memory: "${MEMORY_LIMIT}"
+                requests:
+                  cpu: "${CPU_REQUEST}"
+                  memory: "${MEMORY_REQUEST}"
+              livenessProbe:
+                httpGet:
+                  path: "/"
+                  port: 8080
+                  scheme: HTTP
+                initialDelaySeconds: 60
+                timeoutSeconds: 5
+                periodSeconds: 30
+                successThreshold: 1
+                failureThreshold: 3
+              readinessProbe:
+                httpGet:
+                  path: "/"
+                  port: 8080
+                  scheme: HTTP
+                initialDelaySeconds: 30
+                timeoutSeconds: 5
+                periodSeconds: 30
+                successThreshold: 1
+                failureThreshold: 10
+              terminationMessagePath: "/dev/termination-log"
+              terminationMessagePolicy: File
+              imagePullPolicy: Always
+          restartPolicy: Always
+          terminationGracePeriodSeconds: 30
+          dnsPolicy: ClusterFirst
+          securityContext: {}
+          schedulerName: default-scheduler

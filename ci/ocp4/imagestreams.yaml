@@ -1,0 +1,84 @@
+---
+kind: Template
+apiVersion: template.openshift.io/v1
+metadata:
+  name: bcgov-baserow-is
+parameters:
+  - description: The OpenShift Namespace where the ImageStream resides.
+    displayName: Namespace
+    name: IS_NAMESPACE
+    value: acf456-tools
+  - description: Version of BaseRow app to be used (e.g. 1.13.0).
+    displayName: Version of BaseRow
+    name: BASEROW_TAG
+    value: "1.13.3"
+  - name: CADDY_TAG
+    value: "2"
+  - name: REDIS_TAG
+    value: "6"
+  - name: DOCKER_REGISTRY
+    value: "artifacts.developer.gov.bc.ca/docker-remote"    
+    required: true
+  - name: CPU_LIMIT
+    value: "200m"
+  - name: MEMORY_LIMIT
+    value: "512Mi"
+  - name: CPU_REQUEST
+    value: "50m"
+  - name: MEMORY_REQUEST
+    value: "200Mi"
+objects:
+  - apiVersion: v1
+    kind: ImageStream
+    metadata:
+      labels:
+        app: "bcgov-baserow"
+      name: "bcgov-baserow-backend"
+    spec:
+      lookupPolicy:
+        local: false
+      tags:
+        - name: ${BASEROW_TAG}
+          from:
+            kind: DockerImage
+            name: ${DOCKER_REGISTRY}/baserow/backend:${BASEROW_TAG}
+          pullSecret:
+            name: docker-pull-passthru            
+          referencePolicy:
+            type: Local
+  - apiVersion: v1
+    kind: ImageStream
+    metadata:
+      labels:
+        app: "bcgov-baserow"
+      name: "bcgov-baserow-caddy"
+    spec:
+      lookupPolicy:
+        local: false
+      tags:
+        - name: ${CADDY_TAG}
+          from:
+            kind: DockerImage
+            name: ${DOCKER_REGISTRY}/caddy:${CADDY_TAG}
+          pullSecret:
+            name: docker-pull-passthru            
+          referencePolicy:
+            type: Local
+  - apiVersion: v1
+    kind: ImageStream
+    metadata:
+      labels:
+        app: "bcgov-baserow"
+      name: "bcgov-baserow-redis"
+    spec:
+      lookupPolicy:
+        local: false
+      tags:
+        - name: ${REDIS_TAG}
+          from:
+            kind: DockerImage
+            name: ${DOCKER_REGISTRY}/redis:${REDIS_TAG}
+          pullSecret:
+            name: docker-pull-passthru            
+          referencePolicy:
+            type: Local

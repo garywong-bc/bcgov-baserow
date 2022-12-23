@@ -1,0 +1,25 @@
+---
+kind: Template
+apiVersion: template.openshift.io/v1
+metadata:
+  name: bcgov-baserow-configmap-dc
+parameters:
+  - description: The short-name of the BaseRow Service, lower-case with hyphen.
+    displayName: BaseRow Acronym
+    name: APP_NAME
+    required: true
+    value: test
+objects:
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: "${APP_NAME}-baserow-configmap"
+      labels:
+        app: "${APP_NAME}-baserow"
+    data:
+      BASEROW_PUBLIC_URL: "http://${APP_NAME}-baserow:8000"
+      WEB_FRONTEND_PORT: "8000"
+      WEB_FRONTEND_SSL_PORT: "4443"
+      MIGRATE_ON_STARTUP: "true"
+      SYNC_TEMPLATES_ON_STARTUP: "true"
+      PRIVATE_BACKEND_URL: "http://backend:8000"

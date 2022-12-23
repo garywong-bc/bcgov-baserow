@@ -45,7 +45,7 @@ objects:
   - kind: PersistentVolumeClaim
     apiVersion: v1
     metadata:
-      name: "${APP_NAME}-postgresql-pvc"
+      name: "${APP_NAME}-baserow-postgresql-pvc"
       labels:
         app: "${APP_NAME}-baserow"
     spec:
@@ -58,7 +58,7 @@ objects:
   - kind: DeploymentConfig
     apiVersion: v1
     metadata:
-      name: "${APP_NAME}-postgresql-dc"
+      name: "${APP_NAME}-baserow-postgresql-dc"
       labels:
         app: "${APP_NAME}-baserow"
       annotations: {}
@@ -75,7 +75,7 @@ objects:
           imageChangeParams:
             automatic: true
             containerNames:
-              - "${APP_NAME}-postgresql"
+              - "${APP_NAME}-baserow-postgresql"
             from:
               kind: ImageStreamTag
               namespace: openshift
@@ -85,21 +85,21 @@ objects:
       test: false
       selector:
         app: "${APP_NAME}-baserow"
-        deploymentconfig: "${APP_NAME}-postgresql"
+        deploymentconfig: "${APP_NAME}-baserow-postgresql"
       template:
         metadata:
           creationTimestamp:
           labels:
             app: "${APP_NAME}-baserow"
-            deploymentconfig: "${APP_NAME}-postgresql"
+            deploymentconfig: "${APP_NAME}-baserow-postgresql"
           annotations: {}
         spec:
           volumes:
             - name: postgresql-volume
               persistentVolumeClaim:
-                claimName: "${APP_NAME}-postgresql"
+                claimName: "${APP_NAME}-baserow-postgresql-pvc"
           containers:
-            - name: "${APP_NAME}-postgresql"
+            - name: "${APP_NAME}-baserow-postgresql"
               image: image-registry.openshift-image-registry.svc:5000/openshift/postgresql:12
               ports:
                 - containerPort: 5432
@@ -108,17 +108,17 @@ objects:
                 - name: POSTGRESQL_DATABASE
                   valueFrom:
                     secretKeyRef:
-                      name: "${APP_NAME}-postgresql"
+                      name: "${APP_NAME}-baserow-postgresql"
                       key: database-name
                 - name: POSTGRESQL_PASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: "${APP_NAME}-postgresql"
+                      name: "${APP_NAME}-baserow-postgresql"
                       key: database-password
                 - name: POSTGRESQL_USER
                   valueFrom:
                     secretKeyRef:
-                      name: "${APP_NAME}-postgresql"
+                      name: "${APP_NAME}-baserow-postgresql"
                       key: database-user
               resources: {}
               volumeMounts:
@@ -148,7 +148,7 @@ objects:
   - kind: Service
     apiVersion: v1
     metadata:
-      name: "${APP_NAME}-postgresql"
+      name: "${APP_NAME}-baserow-postgresql"
       labels:
         app: "${APP_NAME}-baserow"
       annotations: {}
@@ -160,7 +160,7 @@ objects:
           targetPort: 5432
       selector:
         app: "${APP_NAME}-baserow"
-        deploymentconfig: "${APP_NAME}-postgresql"
+        deploymentconfig: "${APP_NAME}-baserow-postgresql"
       type: ClusterIP
       sessionAffinity: None
     status:

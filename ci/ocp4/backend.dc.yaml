@@ -1,29 +1,27 @@
 ---
 kind: Template
 apiVersion: template.openshift.io/v1
+message: A new Baserow backend application has been created in your project
 metadata:
-  name: bcgov-baserow-app-dc
+  name: bcgov-baserow-backend-dc
 parameters:
-  # - description: The OpenShift Namespace where the ImageStream resides.
-  #   displayName: Namespace
-  #   name: IS_NAMESPACE
-  #   value: acf456-dev
+  - description: The OpenShift Namespace where the ImageStream resides.
+    displayName: ImageStream Namespace
+    name: IS_NAMESPACE
+    value: "acf456-tools"
   # - description: The OpenShift ImageStream name.
   #   displayName: Image Stream
   #   name: IS_NAME
   #   value: baserow-bcgov
-  - description: Version of BaseRow app to be used (e.g. 1.13.2).
+  - description: Version of BaseRow app to be used (e.g. 1.13.0).
     displayName: Version of BaseRow
-    name: IMAGE_TAG
-    value: 1.13.2
-  - description: The short-name of the BaseRow Service, lower-case with hyphen.
+    name: BASEROW_TAG
+    value: "1.13.2"    
+  - description: The short-name of the Survey Service, lower-case with hyphen.
     displayName: BaseRow Acronym
     name: APP_NAME
     required: true
     value: test
-  - name: DOCKER_REGISTRY
-    value: "artifacts.developer.gov.bc.ca/docker-remote"    
-    required: true
   - name: CPU_LIMIT
     value: "200m"
   - name: MEMORY_LIMIT
@@ -36,7 +34,7 @@ objects:
   - kind: DeploymentConfig
     apiVersion: v1
     metadata:
-      name: "${APP_NAME}-baserow-celery"
+      name: "${APP_NAME}-baserow-backend-dc"
       generation: 1
       labels:
         app: "${APP_NAME}-baserow"
@@ -58,26 +56,26 @@ objects:
           imageChangeParams:
             automatic: true
             containerNames:
-              - "${APP_NAME}-baserow-celery"
+              - "${APP_NAME}-baserow-backend"
             from:
               kind: ImageStreamTag
-              name: bcgov-baserow-backend:${IMAGE_TAG}
+              namespace: ${IS_NAMESPACE}
+              name: bcgov-baserow-backend:${BASEROW_TAG}
       replicas: 1
       revisionHistoryLimit: 10
       test: false
       selector:
         app: "${APP_NAME}-baserow"
-        deploymentconfig: "${APP_NAME}-baserow-celery"
+        deploymentconfig: "${APP_NAME}-baserow-backend"
       template:
         metadata:
-          name: "${APP_NAME}-baserow-celery"
           labels:
             app: "${APP_NAME}-baserow"
-            deploymentconfig: "${APP_NAME}-baserow-celery"
+            deploymentconfig: "${APP_NAME}-baserow-backend"
           annotations: {}
         spec:
           containers:
-            - name: "${APP_NAME}-baserow-celery"
+            - name: "${APP_NAME}-baserow-backend"
               image: " "
               ports:
                 - containerPort: 8080
@@ -90,20 +88,22 @@ objects:
                     secretKeyRef:
                       name: "${APP_NAME}-baserow-postgresql"
                       key: database-user
-                - name: DB_PASSWORD
+                - name: DATABASE_PASSWORD
                   valueFrom:
                     secretKeyRef:
                       name: "${APP_NAME}-baserow-postgresql"
                       key: database-password
-                - name: DB_NAME
+                - name: DATABASE_NAME
                   valueFrom:
                     secretKeyRef:
                       name: "${APP_NAME}-baserow-postgresql"
                       key: database-name
-                - name: DB_HOST
+                - name: DATABASE_HOST
                   value: "${APP_NAME}-baserow-postgresql"
-                - name: DB_PORT
+                - name: DATABASE_PORT
                   value: "5432"
+                # - name: DATABASE_URL
+                #   value: postgresql://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)
                 - name: BASEROW_PUBLIC_URL
                   value: "https://${APP_NAME}-baserow-url"
               resources:

@@ -1,19 +1,35 @@
 version: "3.4"
-# Runs Baserow with each service in its own container and builds the Baserow images
-# from this local repository instead of using the pre-built images from Dockerhub.
-# Otherwise, identical to docker-compose.yml.
+########################################################################################
+#
+# READ ME FIRST!
+#
+# Use the much simpler `docker-compose.all-in-one.yml` instead of this file
+# unless you are an advanced user!
+#
+# This compose file runs every service separately using a Caddy reverse proxy to route
+# requests to the backend or web-frontend, handle websockets and to serve uploaded files
+# . Even if you have your own http proxy we recommend to simply forward requests to it
+# as it is already properly configured for Baserow.
+#
+# If you wish to continue with this more advanced compose file, it is recommended that
+# you set environment variables using the .env.example file by:
+# 1. `cp .env.example .env`
+# 2. Edit .env and fill in the first 3 variables.
+# 3. Set further environment variables as you wish.
 #
 # More documentation can be found in:
 # https://baserow.io/docs/installation%2Finstall-with-docker-compose
+#
+########################################################################################
 
 # See https://baserow.io/docs/installation%2Fconfiguration for more details on these
 # backend environment variables, their defaults if left blank etc.
 x-backend-variables: &backend-variables
   # Most users should only need to set these first four variables.
   SECRET_KEY: ${SECRET_KEY:?}
+  BASEROW_JWT_SIGNING_KEY: ${BASEROW_JWT_SIGNING_KEY:-}
   DATABASE_PASSWORD: ${DATABASE_PASSWORD:?}
   REDIS_PASSWORD: ${REDIS_PASSWORD:?}
-  BASEROW_JWT_SIGNING_KEY: ${BASEROW_JWT_SIGNING_KEY:-}
   # If you manually change this line make sure you also change the duplicate line in
   # the web-frontend service.
   BASEROW_PUBLIC_URL: ${BASEROW_PUBLIC_URL-http://localhost}
@@ -72,7 +88,7 @@ x-backend-variables: &backend-variables
   BASEROW_BACKEND_LOG_LEVEL:
   FEATURE_FLAGS:
 
-  PRIVATE_BACKEND_URL: http://backend:8000
+  PRIVATE_BACKEND_URL: http://backend-asgi:8000
   PUBLIC_BACKEND_URL:
   PUBLIC_WEB_FRONTEND_URL:
   MEDIA_URL:
@@ -96,6 +112,8 @@ x-backend-variables: &backend-variables
   BASEROW_JOB_SOFT_TIME_LIMIT:
   BASEROW_FRONTEND_JOBS_POLLING_TIMEOUT_MS:
   BASEROW_INITIAL_CREATE_SYNC_TABLE_DATA_LIMIT:
+  BASEROW_MAX_SNAPSHOTS_PER_GROUP:
+  BASEROW_SNAPSHOT_EXPIRATION_TIME_DAYS:
   BASEROW_WEBHOOKS_ALLOW_PRIVATE_ADDRESS:
   BASEROW_WEBHOOKS_IP_BLACKLIST:
   BASEROW_WEBHOOKS_IP_WHITELIST:
@@ -112,38 +130,40 @@ services:
   # A caddy reverse proxy sitting in-front of all the services. Responsible for routing
   # requests to either the backend or web-frontend and also serving user uploaded files
   # from the media volume.
+  # GW TO do change local port 443 as it won't work on OCP
+  # 443, 2019, 8000 (host) ->80 (${BASEROW_CADDY_ADDRESSES), 8443->443
   caddy:
-    platform: linux/arm64/v8
     image: caddy:2
     restart: unless-stopped
     environment:
       # Controls what port the Caddy server binds to inside its container.
-      BASEROW_CADDY_ADDRESSES: ${BASEROW_CADDY_ADDRESSES:-:80}
       PRIVATE_WEB_FRONTEND_URL: ${PRIVATE_WEB_FRONTEND_URL:-http://web-frontend:3000}
-      PRIVATE_BACKEND_URL: ${PRIVATE_BACKEND_URL:-http://backend:8000}
+      PRIVATE_BACKEND_URL: ${PRIVATE_BACKEND_URL:-http://backend-asgi:8000}
     ports:
-      - "${HOST_PUBLISH_IP:-0.0.0.0}:${WEB_FRONTEND_PORT:-80}:80"
-      - "${HOST_PUBLISH_IP:-0.0.0.0}:${WEB_FRONTEND_SSL_PORT:-443}:443"
+      - "${HOST_PUBLISH_IP:-0.0.0.0}:${WEB_FRONTEND_PORT:-80}:8080"
+      - "${HOST_PUBLISH_IP:-0.0.0.0}:${WEB_FRONTEND_SSL_PORT:-443}:8443"
     volumes:
       - $PWD/Caddyfile:/etc/caddy/Caddyfile
       - media:/baserow/media
       - caddy_config:/config
       - caddy_data:/data
     healthcheck:
-      test: [ "CMD", "wget", "--spider", "http://localhost/caddy-health-check" ]
+      test: [ "CMD", "wget", "--spider", "http://localhost:8080/caddy-health-check" ]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
       local:
 
-  backend:
+  # 8000
+  backend-asgi:
     platform: linux/amd64
-    image: baserow_backend:latest
-    build:
-      dockerfile: ./backend/Dockerfile
-      context: .
+    image: baserow/backend:1.13.3
     restart: unless-stopped
+    command: gunicorn
+    working_dir: /baserow    
+    healthcheck:
+      test: [ "CMD-SHELL", "curl --fail --silent http://localhost:8000/api/_health/" ]
     environment:
       <<: *backend-variables
     depends_on:
@@ -154,16 +174,14 @@ services:
     networks:
       local:
 
+  # 3000
   web-frontend:
     platform: linux/amd64
-    image: baserow_web-frontend:latest
-    build:
-      dockerfile: ./web-frontend/Dockerfile
-      context: .
+    image: baserow/web-frontend:1.13.3
     restart: unless-stopped
     environment:
       BASEROW_PUBLIC_URL: ${BASEROW_PUBLIC_URL-http://localhost}
-      PRIVATE_BACKEND_URL: ${PRIVATE_BACKEND_URL:-http://backend:8000}
+      PRIVATE_BACKEND_URL: ${PRIVATE_BACKEND_URL:-http://backend-asgi:8000}
       PUBLIC_BACKEND_URL:
       PUBLIC_WEB_FRONTEND_URL:
       BASEROW_DISABLE_PUBLIC_URL_CHECK:
@@ -177,16 +195,13 @@ services:
       BASEROW_MAX_IMPORT_FILE_SIZE_MB:
       BASEROW_MAX_SNAPSHOTS_PER_GROUP:
     depends_on:
-      - backend
+      - backend-asgi
     networks:
       local:
 
   celery:
     platform: linux/amd64
-    image: baserow_backend:latest
-    build:
-      dockerfile: ./backend/Dockerfile
-      context: .
+    image: baserow/backend:1.13.3
     restart: unless-stopped
     environment:
       <<: *backend-variables
@@ -196,7 +211,7 @@ services:
     healthcheck:
       test: [ "CMD-SHELL", "/baserow/backend/docker/docker-entrypoint.sh celery-worker-healthcheck" ]
     depends_on:
-      - backend
+      - backend-asgi
     volumes:
       - media:/baserow/media
     networks:
@@ -204,10 +219,7 @@ services:
 
   celery-export-worker:
     platform: linux/amd64
-    image: baserow_backend:latest
-    build:
-      dockerfile: ./backend/Dockerfile
-      context: .
+    image: baserow/backend:1.13.3
     restart: unless-stopped
     command: celery-exportworker
     environment:
@@ -217,7 +229,7 @@ services:
     healthcheck:
       test: [ "CMD-SHELL", "/baserow/backend/docker/docker-entrypoint.sh celery-exportworker-healthcheck" ]
     depends_on:
-      - backend
+      - backend-asgi
     volumes:
       - media:/baserow/media
     networks:
@@ -225,10 +237,7 @@ services:
 
   celery-beat-worker:
     platform: linux/amd64
-    image: baserow_backend:latest
-    build:
-      dockerfile: ./backend/Dockerfile
-      context: .
+    image: baserow/backend:1.13.3
     restart: unless-stopped
     command: celery-beat
     environment:
@@ -239,15 +248,15 @@ services:
     healthcheck:
       test: [ "CMD-SHELL", "exit 0" ]
     depends_on:
-      - backend
+      - backend-asgi
     volumes:
       - media:/baserow/media
     networks:
       local:
 
+  # 5432
   db:
-    platform: linux/arm64/v8
-    image: postgres:11
+    image: postgres:14
     restart: unless-stopped
     environment:
       - POSTGRES_USER=${DATABASE_USER:-baserow}
@@ -263,8 +272,8 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  # 6379
   redis:
-    platform: linux/arm64/v8
     image: redis:6
     command: redis-server --requirepass ${REDIS_PASSWORD:?}
     healthcheck:

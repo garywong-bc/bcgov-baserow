@@ -1,0 +1,38 @@
+{
+        http_port 8080
+        https_port 8443
+        auto_https off
+}
+
+localhost:8080 {
+        handle /api/* {
+                reverse_proxy {$PRIVATE_BACKEND_URL:localhost:8000}
+        }
+
+        handle /ws/* {
+                reverse_proxy {$PRIVATE_BACKEND_URL:localhost:8000}
+        }
+
+        respond /caddy-health-check 200
+
+        handle_path /media/* {
+                @downloads {
+                        query dl=*
+                }
+                header @downloads Content-disposition "attachment; filename={query.dl}"
+
+                file_server {
+                        root {$MEDIA_ROOT:/baserow/media/}
+                }
+        }
+
+        handle_path /static/* {
+                file_server {
+                        root {$STATIC_ROOT:/baserow/static/}
+                }
+        }
+
+        reverse_proxy {$PRIVATE_WEB_FRONTEND_URL:localhost:3000}
+
+}
+

@@ -1,0 +1,199 @@
+---
+kind: Template
+apiVersion: template.openshift.io/v1
+message: A new Baserow redis application has been created in your project
+metadata:
+  name: bcgov-baserow-redis
+parameters:
+  - description: The OpenShift Namespace where the ImageStream resides.
+    displayName: ImageStream Namespace
+    name: IS_NAMESPACE
+    value: "acf456-tools"
+  - description: Version of Redis app to be used (e.g. 1.13.0).
+    displayName: Version of BaseRow
+    name: REDIS_TAG
+    value: "6"      
+  # - description: Redis protocol to be used (e.g. rediss/redis).
+  #   displayName: Redis protocl
+  #   name: REDIS_PROTOCOL
+  #   value: "redis"      
+  - description: The short-name of the Baserow Service, lower-case with hyphen.
+    displayName: BaseRow Acronym
+    name: APP_NAME
+    required: true
+    value: "test" 
+  - description: Password for the Redis server.
+    displayName: Redis Server Password
+    from: "[a-zA-Z0-9]{12}"
+    generate: expression
+    name: REDIS_PASSWORD
+    required: true
+  - description: Volume space available for data, e.g. 512Mi, 2Gi.
+    displayName: Redis Data Capacity
+    name: REDIS_VOLUME_CAPACITY
+    required: true
+    value: 128Mi    
+  - name: CPU_LIMIT
+    value: "200m"
+  - name: MEMORY_LIMIT
+    value: "512Mi"
+  - name: CPU_REQUEST
+    value: "50m"
+  - name: MEMORY_REQUEST
+    value: "200Mi"
+objects:
+  - kind: Secret
+    apiVersion: v1
+    metadata:
+      name: "${APP_NAME}-baserow-redis"
+      labels:
+        app: "${APP_NAME}-baserow"
+      annotations:
+        description: Database credentials and name.
+        template.openshift.io/expose-password: "{.data['redis-password']}"
+        # template.openshift.io/expose-username: "{.data['redis-user']}"
+        # template.openshift.io/expose-protocol: "{.data['redis-protocol']}"
+    stringData:
+      redis-password: "${REDIS_PASSWORD}"
+  - kind: PersistentVolumeClaim
+    apiVersion: v1
+    metadata:
+      name: "${APP_NAME}-baserow-redis-pvc"
+      labels:
+        app: "${APP_NAME}-baserow"
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: "${REDIS_VOLUME_CAPACITY}"
+      storageClassName: netapp-file-standard
+  - kind: DeploymentConfig
+    apiVersion: v1
+    metadata:
+      name: "${APP_NAME}-baserow-redis"
+      generation: 1
+      labels:
+        app: "${APP_NAME}-baserow"
+      annotations: {}
+    spec:
+      strategy:
+        type: Rolling
+        rollingParams:
+          updatePeriodSeconds: 1
+          intervalSeconds: 1
+          timeoutSeconds: 600
+          maxUnavailable: 25%
+          maxSurge: 25%
+        resources: {}
+        activeDeadlineSeconds: 21600
+      triggers:
+        - type: ConfigChange
+        - type: ImageChange
+          imageChangeParams:
+            automatic: true
+            containerNames:
+              - "${APP_NAME}-baserow-redis"
+            from:
+              kind: ImageStreamTag
+              namespace: ${IS_NAMESPACE}
+              name: bcgov-baserow-redis:${REDIS_TAG}
+      replicas: 1
+      revisionHistoryLimit: 10
+      test: false
+      selector:
+        app: "${APP_NAME}-baserow"
+        deploymentconfig: "${APP_NAME}-baserow-redis"
+      template:
+        metadata:
+          labels:
+            app: "${APP_NAME}-baserow"
+            deploymentconfig: "${APP_NAME}-baserow-redis"
+          annotations: {}
+        spec:
+          volumes:
+            - name: redis-data
+              persistentVolumeClaim:
+                claimName: "${APP_NAME}-baserow-redis-pvc"
+          containers:
+            - name: "${APP_NAME}-baserow-redis"
+              image: " "
+              args:
+              - redis-server
+              - --requirepass ${REDIS_PASSWORD}
+              ports:
+                - containerPort: 6379
+                  protocol: TCP
+              env:
+                - name: REDIS_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: "${APP_NAME}-baserow-redis"
+                      key: redis-password
+              resources:              
+                limits:
+                  cpu: "${CPU_LIMIT}"
+                  memory: "${MEMORY_LIMIT}"
+                requests:
+                  cpu: "${CPU_REQUEST}"
+                  memory: "${MEMORY_REQUEST}"
+              volumeMounts:
+                - name: redis-data
+                  mountPath: "/var/lib/redis/data"                  
+              livenessProbe:
+                exec:
+                  command:
+                  - /bin/sh
+                  - -i
+                  - -c
+                  - redis-cli --no-auth-warning -a $REDIS_PASSWORD ping 
+                  # command:
+                  # - /bin/sh
+                  # - -i
+                  # - -c
+                  # - test "$(redis-cli --no-auth-warning -h 127.0.0.1 -a \$REDIS_PASSWORD ping)" == "PONG"
+                initialDelaySeconds: 60
+                timeoutSeconds: 5
+                periodSeconds: 30
+                successThreshold: 1
+                failureThreshold: 3
+              readinessProbe:
+                exec:
+                  command:
+                  - /bin/sh
+                  - -i
+                  - -c
+                  - redis-cli --no-auth-warning -a $REDIS_PASSWORD ping 
+                initialDelaySeconds: 30
+                timeoutSeconds: 5
+                periodSeconds: 30
+                successThreshold: 1
+                failureThreshold: 10
+              terminationMessagePath: "/dev/termination-log"
+              terminationMessagePolicy: File
+              imagePullPolicy: Always
+          restartPolicy: Always
+          terminationGracePeriodSeconds: 30
+          dnsPolicy: ClusterFirst
+          securityContext: {}
+          schedulerName: default-scheduler
+  - kind: Service
+    apiVersion: v1
+    metadata:
+      name: "${APP_NAME}-baserow-redis"
+      labels:
+        app: "${APP_NAME}-baserow"
+      annotations: {}
+    spec:
+      ports:
+        - name: 6379-tcp
+          protocol: TCP
+          port: 6379
+          targetPort: 6379
+      selector:
+        app: "${APP_NAME}-baserow"
+        deploymentconfig: "${APP_NAME}-baserow-redis"
+      type: ClusterIP
+      sessionAffinity: None
+    status:
+      loadBalancer: {}

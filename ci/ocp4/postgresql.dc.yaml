@@ -58,7 +58,7 @@ objects:
   - kind: DeploymentConfig
     apiVersion: v1
     metadata:
-      name: "${APP_NAME}-baserow-postgresql-dc"
+      name: "${APP_NAME}-baserow-postgresql"
       labels:
         app: "${APP_NAME}-baserow"
       annotations: {}

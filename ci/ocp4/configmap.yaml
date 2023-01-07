@@ -24,6 +24,7 @@ objects:
       SYNC_TEMPLATES_ON_STARTUP: "true"
       PRIVATE_BACKEND_URL: "http://backend-asgi:8000"
       BASEROW_AMOUNT_OF_GUNICORN_WORKERS: "3"
+      BASEROW_AMOUNT_OF_WORKERS: "1"      
       EMAIL_SMTP: "T"
       EMAIL_SMTP_HOST: "apps.smtp.gov.bc.ca"
       EMAIL_SMTP_PORT: "25"

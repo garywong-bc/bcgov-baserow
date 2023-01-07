@@ -10,11 +10,14 @@ parameters:
     name: APP_NAME
     required: true
     value: test
-  - description: Maximum amount of memory the container can use.
-    displayName: Memory Limit
-    name: MEMORY_LIMIT
-    required: true
-    value: 256Mi
+  - name: CPU_LIMIT
+    value: "200m"
+  - name: MEMORY_LIMIT
+    value: "175Mi"
+  - name: CPU_REQUEST
+    value: "50m"
+  - name: MEMORY_REQUEST
+    value: "100Mi"
   - description: Password for the PostgreSQL connection user.
     displayName: PostgreSQL Connection Password
     from: "[a-zA-Z0-9]{16}"
@@ -25,7 +28,7 @@ parameters:
     displayName: Database Volume Capacity
     name: DB_VOLUME_CAPACITY
     required: true
-    value: 256Mi
+    value: 128Mi
 objects:
   - kind: Secret
     apiVersion: v1
@@ -124,6 +127,13 @@ objects:
               volumeMounts:
                 - name: postgresql-volume
                   mountPath: "/var/lib/pgsql/data"
+              resources:
+                limits:
+                  cpu: "${CPU_LIMIT}"
+                  memory: "${MEMORY_LIMIT}"
+                requests:
+                  cpu: "${CPU_REQUEST}"
+                  memory: "${MEMORY_REQUEST}"  
               livenessProbe:
                 initialDelaySeconds: 30
                 tcpSocket:

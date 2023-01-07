@@ -1,9 +1,9 @@
 ---
 kind: Template
 apiVersion: template.openshift.io/v1
-message: A new Baserow backend application has been created in your project
+message: A new Baserow backend worker application has been created in your project
 metadata:
-  name: bcgov-baserow-backend-asgi
+  name: bcgov-baserow-backend-worker
 parameters:
   - description: The OpenShift Namespace where the ImageStream resides.
     displayName: ImageStream Namespace
@@ -21,15 +21,15 @@ parameters:
   - description: The disk space reserved for media uploads.
     displayName: Media Folder size
     name: MEDIA_FOLDER_CAPACITY
-    value: 64Mi    
+    value: 64Mi   
   - name: CPU_LIMIT
-    value: "256m"
+    value: "150m"
   - name: MEMORY_LIMIT
-    value: "384Mi"
+    value: "640Mi"
   - name: CPU_REQUEST
-    value: "50m"
+    value: "100m"
   - name: MEMORY_REQUEST
-    value: "200Mi"
+    value: "400Mi"
 objects:
   - kind: PersistentVolumeClaim
     apiVersion: v1
@@ -47,7 +47,7 @@ objects:
   - kind: DeploymentConfig
     apiVersion: v1
     metadata:
-      name: "${APP_NAME}-baserow-backend-asgi"
+      name: "${APP_NAME}-baserow-backend-worker"
       generation: 1
       labels:
         app: "${APP_NAME}-baserow"
@@ -69,7 +69,7 @@ objects:
           imageChangeParams:
             automatic: true
             containerNames:
-              - "${APP_NAME}-baserow-backend-asgi"
+              - "${APP_NAME}-baserow-backend-worker"
             from:
               kind: ImageStreamTag
               namespace: ${IS_NAMESPACE}
@@ -79,12 +79,12 @@ objects:
       test: false
       selector:
         app: "${APP_NAME}-baserow"
-        deploymentconfig: "${APP_NAME}-baserow-backend-asgi"
+        deploymentconfig: "${APP_NAME}-baserow-backend-worker"
       template:
         metadata:
           labels:
             app: "${APP_NAME}-baserow"
-            deploymentconfig: "${APP_NAME}-baserow-backend-asgi"
+            deploymentconfig: "${APP_NAME}-baserow-backend-worker"
           annotations: {}
         spec:
           volumes:
@@ -92,12 +92,11 @@ objects:
               persistentVolumeClaim:
                 claimName: "${APP_NAME}-baserow-app-media"
           containers:
-            - name: "${APP_NAME}-baserow-backend-asgi"
+            - name: "${APP_NAME}-baserow-backend-worker"
               image: " "
-              workingDir: /baserow
-              # `timeout` param as per https://stackoverflow.com/a/71092624              
+              workingDir: /baserow   
               args:
-              - gunicorn
+              - "celery-worker"
               ports:
                 - containerPort: 8000
                   protocol: TCP
@@ -122,25 +121,25 @@ objects:
                       key: redis-password
                 - name: REDIS_HOST
                   value: "${APP_NAME}-baserow-redis"        
-                - name: DATABASE_USER
-                  valueFrom:
-                    secretKeyRef:
-                      name: "${APP_NAME}-baserow-postgresql"
-                      key: database-user
-                - name: DATABASE_PASSWORD
-                  valueFrom:
-                    secretKeyRef:
-                      name: "${APP_NAME}-baserow-postgresql"
-                      key: database-password
-                - name: DATABASE_NAME
-                  valueFrom:
-                    secretKeyRef:
-                      name: "${APP_NAME}-baserow-postgresql"
-                      key: database-name
-                - name: DATABASE_HOST
-                  value: "${APP_NAME}-baserow-postgresql"
-                - name: DATABASE_PORT
-                  value: "5432"
+                # - name: DATABASE_USER
+                #   valueFrom:
+                #     secretKeyRef:
+                #       name: "${APP_NAME}-baserow-postgresql"
+                #       key: database-user
+                # - name: DATABASE_PASSWORD
+                #   valueFrom:
+                #     secretKeyRef:
+                #       name: "${APP_NAME}-baserow-postgresql"
+                #       key: database-password
+                # - name: DATABASE_NAME
+                #   valueFrom:
+                #     secretKeyRef:
+                #       name: "${APP_NAME}-baserow-postgresql"
+                #       key: database-name
+                # - name: DATABASE_HOST
+                #   value: "${APP_NAME}-baserow-postgresql"
+                # - name: DATABASE_PORT
+                #   value: "5432"
               resources:
                 limits:
                   cpu: "${CPU_LIMIT}"
@@ -153,20 +152,21 @@ objects:
                   mountPath: "/baserow/media"
               livenessProbe:
                 tcpSocket:
-                  port: 8000
-                # longer initDelay as per https://stackoverflow.com/a/74017738          
+                  port: 8000                
                 initialDelaySeconds: 120
                 timeoutSeconds: 5
                 periodSeconds: 60
                 successThreshold: 1
                 failureThreshold: 3
               readinessProbe:
-                httpGet:
-                  path: "/api/_health/"
-                  port: 8000
-                  scheme: HTTP   
+                exec:
+                  command:
+                  - /bin/sh
+                  - -i
+                  - -c
+                  - "/baserow/backend/docker/docker-entrypoint.sh celery-worker-healthcheck"
                 initialDelaySeconds: 120
-                timeoutSeconds: 10
+                timeoutSeconds: 5
                 periodSeconds: 60
                 successThreshold: 1
                 failureThreshold: 10
@@ -178,23 +178,23 @@ objects:
           dnsPolicy: ClusterFirst
           securityContext: {}
           schedulerName: default-scheduler
-  - kind: Service
-    apiVersion: v1
-    metadata:
-      name: "${APP_NAME}-baserow-backend-asgi"
-      labels:
-        app: "${APP_NAME}-baserow"
-      annotations: {}
-    spec:
-      ports:
-        - name: 8000-tcp
-          protocol: TCP
-          port: 8000
-          targetPort: 8000
-      selector:
-        app: "${APP_NAME}-baserow"
-        deploymentconfig: "${APP_NAME}-baserow-backend-asgi"
-      type: ClusterIP
-      sessionAffinity: None
-    status:
-      loadBalancer: {}
+  # - kind: Service
+  #   apiVersion: v1
+  #   metadata:
+  #     name: "${APP_NAME}-baserow-backend-worker"
+  #     labels:
+  #       app: "${APP_NAME}-baserow"
+  #     annotations: {}
+  #   spec:
+  #     ports:
+  #       - name: 8000-tcp
+  #         protocol: TCP
+  #         port: 8000
+  #         targetPort: 8000
+  #     selector:
+  #       app: "${APP_NAME}-baserow"
+  #       deploymentconfig: "${APP_NAME}-baserow-backend-worker"
+  #     type: ClusterIP
+  #     sessionAffinity: None
+  #   status:
+  #     loadBalancer: {}

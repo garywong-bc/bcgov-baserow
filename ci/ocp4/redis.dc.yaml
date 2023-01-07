@@ -8,15 +8,11 @@ parameters:
   - description: The OpenShift Namespace where the ImageStream resides.
     displayName: ImageStream Namespace
     name: IS_NAMESPACE
-    value: "acf456-tools"
+    value: "openshift"
   - description: Version of Redis app to be used (e.g. 1.13.0).
     displayName: Version of BaseRow
     name: REDIS_TAG
-    value: "6"      
-  # - description: Redis protocol to be used (e.g. rediss/redis).
-  #   displayName: Redis protocl
-  #   name: REDIS_PROTOCOL
-  #   value: "redis"      
+    value: "6-el8"         
   - description: The short-name of the Baserow Service, lower-case with hyphen.
     displayName: BaseRow Acronym
     name: APP_NAME
@@ -33,14 +29,19 @@ parameters:
     name: REDIS_VOLUME_CAPACITY
     required: true
     value: 128Mi    
+  - name: DATABASE_SERVICE_NAME
+    displayName: Redis DB Service Name
+    from: "[a-zA-Z0-9]{6}"
+    generate: expression
+    required: true
   - name: CPU_LIMIT
     value: "200m"
   - name: MEMORY_LIMIT
-    value: "512Mi"
+    value: "200Mi"
   - name: CPU_REQUEST
     value: "50m"
   - name: MEMORY_REQUEST
-    value: "200Mi"
+    value: "100Mi"
 objects:
   - kind: Secret
     apiVersion: v1
@@ -97,7 +98,7 @@ objects:
             from:
               kind: ImageStreamTag
               namespace: ${IS_NAMESPACE}
-              name: bcgov-baserow-redis:${REDIS_TAG}
+              name: redis:${REDIS_TAG}
       replicas: 1
       revisionHistoryLimit: 10
       test: false
@@ -130,6 +131,8 @@ objects:
                     secretKeyRef:
                       name: "${APP_NAME}-baserow-redis"
                       key: redis-password
+                - name: DATABASE_SERVICE_NAME
+                  value: "${APP_NAME}-baserow-redis-db"
               resources:              
                 limits:
                   cpu: "${CPU_LIMIT}"
@@ -141,29 +144,20 @@ objects:
                 - name: redis-data
                   mountPath: "/var/lib/redis/data"                  
               livenessProbe:
-                exec:
-                  command:
-                  - /bin/sh
-                  - -i
-                  - -c
-                  - redis-cli --no-auth-warning -a $REDIS_PASSWORD ping 
-                  # command:
-                  # - /bin/sh
-                  # - -i
-                  # - -c
-                  # - test "$(redis-cli --no-auth-warning -h 127.0.0.1 -a \$REDIS_PASSWORD ping)" == "PONG"
-                initialDelaySeconds: 60
-                timeoutSeconds: 5
-                periodSeconds: 30
-                successThreshold: 1
                 failureThreshold: 3
+                initialDelaySeconds: 30
+                periodSeconds: 10
+                successThreshold: 1
+                tcpSocket:
+                  port: 6379
+                timeoutSeconds: 1
               readinessProbe:
                 exec:
                   command:
                   - /bin/sh
                   - -i
                   - -c
-                  - redis-cli --no-auth-warning -a $REDIS_PASSWORD ping 
+                  - test "$(redis-cli -h 127.0.0.1 -a $REDIS_PASSWORD ping)" == "PONG"
                 initialDelaySeconds: 30
                 timeoutSeconds: 5
                 periodSeconds: 30

@@ -1,15 +1,15 @@
 ---
 kind: Template
 apiVersion: template.openshift.io/v1
-message: A new Baserow backend application has been created in your project
+message: A new Baserow frontend application has been created in your project
 metadata:
-  name: bcgov-baserow-backend-asgi
+  name: bcgov-baserow-web-frontend
 parameters:
   - description: The OpenShift Namespace where the ImageStream resides.
     displayName: ImageStream Namespace
     name: IS_NAMESPACE
     value: "acf456-tools"
-  - description: Version of BaseRow app to be used (e.g. 1.13.0).
+  - description: Version of BaseRow app to be used (e.g. 1.13.3).
     displayName: Version of BaseRow
     name: BASEROW_TAG
     value: "1.13.3"    
@@ -18,36 +18,19 @@ parameters:
     name: APP_NAME
     required: true
     value: "test"
-  - description: The disk space reserved for media uploads.
-    displayName: Media Folder size
-    name: MEDIA_FOLDER_CAPACITY
-    value: 64Mi    
   - name: CPU_LIMIT
-    value: "256m"
+    value: "200m"
   - name: MEMORY_LIMIT
-    value: "384Mi"
+    value: "512Mi"
   - name: CPU_REQUEST
     value: "50m"
   - name: MEMORY_REQUEST
     value: "200Mi"
 objects:
-  - kind: PersistentVolumeClaim
-    apiVersion: v1
-    metadata:
-      name: "${APP_NAME}-baserow-app-media"
-      labels:
-        app: "${APP_NAME}-baserow"
-    spec:
-      accessModes:
-        - ReadWriteMany
-      resources:
-        requests:
-          storage: "${MEDIA_FOLDER_CAPACITY}"
-      storageClassName: netapp-file-standard
   - kind: DeploymentConfig
     apiVersion: v1
     metadata:
-      name: "${APP_NAME}-baserow-backend-asgi"
+      name: "${APP_NAME}-baserow-web-frontend"
       generation: 1
       labels:
         app: "${APP_NAME}-baserow"
@@ -69,37 +52,31 @@ objects:
           imageChangeParams:
             automatic: true
             containerNames:
-              - "${APP_NAME}-baserow-backend-asgi"
+              - "${APP_NAME}-baserow-web-frontend"
             from:
               kind: ImageStreamTag
               namespace: ${IS_NAMESPACE}
-              name: bcgov-baserow-backend:${BASEROW_TAG}
+              name: bcgov-baserow-web-frontend:${BASEROW_TAG}
       replicas: 1
       revisionHistoryLimit: 10
       test: false
       selector:
         app: "${APP_NAME}-baserow"
-        deploymentconfig: "${APP_NAME}-baserow-backend-asgi"
+        deploymentconfig: "${APP_NAME}-baserow-web-frontend"
       template:
         metadata:
           labels:
             app: "${APP_NAME}-baserow"
-            deploymentconfig: "${APP_NAME}-baserow-backend-asgi"
+            deploymentconfig: "${APP_NAME}-baserow-web-frontend"
           annotations: {}
         spec:
-          volumes:
-            - name: "${APP_NAME}-baserow-app-media"
-              persistentVolumeClaim:
-                claimName: "${APP_NAME}-baserow-app-media"
           containers:
-            - name: "${APP_NAME}-baserow-backend-asgi"
+            - name: "${APP_NAME}-baserow-web-frontend"
               image: " "
-              workingDir: /baserow
-              # `timeout` param as per https://stackoverflow.com/a/71092624              
               args:
-              - gunicorn
+              - nuxt         
               ports:
-                - containerPort: 8000
+                - containerPort: 3000
                   protocol: TCP
               envFrom:
                 - configMapRef:
@@ -122,25 +99,25 @@ objects:
                       key: redis-password
                 - name: REDIS_HOST
                   value: "${APP_NAME}-baserow-redis"        
-                - name: DATABASE_USER
-                  valueFrom:
-                    secretKeyRef:
-                      name: "${APP_NAME}-baserow-postgresql"
-                      key: database-user
-                - name: DATABASE_PASSWORD
-                  valueFrom:
-                    secretKeyRef:
-                      name: "${APP_NAME}-baserow-postgresql"
-                      key: database-password
-                - name: DATABASE_NAME
-                  valueFrom:
-                    secretKeyRef:
-                      name: "${APP_NAME}-baserow-postgresql"
-                      key: database-name
-                - name: DATABASE_HOST
-                  value: "${APP_NAME}-baserow-postgresql"
-                - name: DATABASE_PORT
-                  value: "5432"
+                # - name: DATABASE_USER
+                #   valueFrom:
+                #     secretKeyRef:
+                #       name: "${APP_NAME}-baserow-postgresql"
+                #       key: database-user
+                # - name: DATABASE_PASSWORD
+                #   valueFrom:
+                #     secretKeyRef:
+                #       name: "${APP_NAME}-baserow-postgresql"
+                #       key: database-password
+                # - name: DATABASE_NAME
+                #   valueFrom:
+                #     secretKeyRef:
+                #       name: "${APP_NAME}-baserow-postgresql"
+                #       key: database-name
+                # - name: DATABASE_HOST
+                #   value: "${APP_NAME}-baserow-postgresql"
+                # - name: DATABASE_PORT
+                #   value: "5432"
               resources:
                 limits:
                   cpu: "${CPU_LIMIT}"
@@ -148,26 +125,22 @@ objects:
                 requests:
                   cpu: "${CPU_REQUEST}"
                   memory: "${MEMORY_REQUEST}"
-              volumeMounts:
-                - name: "${APP_NAME}-baserow-app-media"
-                  mountPath: "/baserow/media"
               livenessProbe:
                 tcpSocket:
-                  port: 8000
-                # longer initDelay as per https://stackoverflow.com/a/74017738          
-                initialDelaySeconds: 120
+                  port: 3000                    
+                initialDelaySeconds: 60
                 timeoutSeconds: 5
-                periodSeconds: 60
+                periodSeconds: 30
                 successThreshold: 1
                 failureThreshold: 3
               readinessProbe:
                 httpGet:
-                  path: "/api/_health/"
-                  port: 8000
+                  path: "/_health"
+                  port: 3000
                   scheme: HTTP   
-                initialDelaySeconds: 120
-                timeoutSeconds: 10
-                periodSeconds: 60
+                initialDelaySeconds: 30
+                timeoutSeconds: 5
+                periodSeconds: 30
                 successThreshold: 1
                 failureThreshold: 10
               terminationMessagePath: "/dev/termination-log"
@@ -181,7 +154,7 @@ objects:
   - kind: Service
     apiVersion: v1
     metadata:
-      name: "${APP_NAME}-baserow-backend-asgi"
+      name: "${APP_NAME}-baserow-web-frontend"
       labels:
         app: "${APP_NAME}-baserow"
       annotations: {}
@@ -190,10 +163,10 @@ objects:
         - name: 8000-tcp
           protocol: TCP
           port: 8000
-          targetPort: 8000
+          targetPort: 3000
       selector:
         app: "${APP_NAME}-baserow"
-        deploymentconfig: "${APP_NAME}-baserow-backend-asgi"
+        deploymentconfig: "${APP_NAME}-baserow-web-frontend"
       type: ClusterIP
       sessionAffinity: None
     status:

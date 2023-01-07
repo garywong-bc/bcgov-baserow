@@ -1,22 +1,19 @@
 ---
 kind: Template
 apiVersion: template.openshift.io/v1
+message: A new Baserow backend application has been created in your project
 metadata:
-  name: bcgov-baserow-celery
+  name: bcgov-baserow-backend-wsgi
 parameters:
   - description: The OpenShift Namespace where the ImageStream resides.
-    displayName: Namespace
+    displayName: ImageStream Namespace
     name: IS_NAMESPACE
-    value: acf456-tools
-  # - description: The OpenShift ImageStream name.
-  #   displayName: Image Stream
-  #   name: IS_NAME
-  #   value: baserow-bcgov
-  - description: Version of BaseRow app to be used (e.g. 1.13.3).
+    value: "acf456-tools"
+  - description: Version of BaseRow app to be used (e.g. 1.13.0).
     displayName: Version of BaseRow
-    name: IMAGE_TAG
-    value: "1.13.3"
-  - description: The short-name of the BaseRow Service, lower-case with hyphen.
+    name: BASEROW_TAG
+    value: "1.13.3"    
+  - description: The short-name of the Survey Service, lower-case with hyphen.
     displayName: BaseRow Acronym
     name: APP_NAME
     required: true
@@ -28,11 +25,11 @@ parameters:
   - name: CPU_LIMIT
     value: "200m"
   - name: MEMORY_LIMIT
-    value: "512Mi"
+    value: "180Mi"
   - name: CPU_REQUEST
     value: "50m"
   - name: MEMORY_REQUEST
-    value: "200Mi"
+    value: "120Mi"
 objects:
   - kind: PersistentVolumeClaim
     apiVersion: v1
@@ -50,7 +47,7 @@ objects:
   - kind: DeploymentConfig
     apiVersion: v1
     metadata:
-      name: "${APP_NAME}-baserow-celery"
+      name: "${APP_NAME}-baserow-backend-wsgi"
       generation: 1
       labels:
         app: "${APP_NAME}-baserow"
@@ -72,23 +69,22 @@ objects:
           imageChangeParams:
             automatic: true
             containerNames:
-              - "${APP_NAME}-baserow-celery"
+              - "${APP_NAME}-baserow-backend-wsgi"
             from:
               kind: ImageStreamTag
               namespace: ${IS_NAMESPACE}
-              name: bcgov-baserow-backend:${IMAGE_TAG}
+              name: bcgov-baserow-backend:${BASEROW_TAG}
       replicas: 1
       revisionHistoryLimit: 10
       test: false
       selector:
         app: "${APP_NAME}-baserow"
-        deploymentconfig: "${APP_NAME}-baserow-celery"
+        deploymentconfig: "${APP_NAME}-baserow-backend-wsgi"
       template:
         metadata:
-          name: "${APP_NAME}-baserow-celery"
           labels:
             app: "${APP_NAME}-baserow"
-            deploymentconfig: "${APP_NAME}-baserow-celery"
+            deploymentconfig: "${APP_NAME}-baserow-backend-wsgi"
           annotations: {}
         spec:
           volumes:
@@ -96,20 +92,37 @@ objects:
               persistentVolumeClaim:
                 claimName: "${APP_NAME}-baserow-app-media"
           containers:
-            - name: "${APP_NAME}-baserow-celery"
+            - name: "${APP_NAME}-baserow-backend-wsgi"
               image: " "
+              workingDir: /baserow   
               args:
-              - celery
-              - worker              
+              - "gunicorn-wsgi"
+              - "--timeout"
+              - "60"
               ports:
                 - containerPort: 8000
                   protocol: TCP
-                - containerPort: 8443
-                  protocol: TCP
               envFrom:
                 - configMapRef:
-                    name: "${APP_NAME}-baserow-configmap"
+                    name: "${APP_NAME}-baserow-configmap"                  
               env:
+                - name: SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: "${APP_NAME}-baserow-secret"
+                      key: secret-key
+                - name: BASEROW_JWT_SIGNING_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: "${APP_NAME}-baserow-secret"
+                      key: baserow-jwt-signing-key
+                - name: REDIS_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: "${APP_NAME}-baserow-redis"
+                      key: redis-password
+                - name: REDIS_HOST
+                  value: "${APP_NAME}-baserow-redis"        
                 - name: DATABASE_USER
                   valueFrom:
                     secretKeyRef:
@@ -139,29 +152,24 @@ objects:
               volumeMounts:
                 - name: "${APP_NAME}-baserow-app-media"
                   mountPath: "/baserow/media"
-#                                    
-              # livenessProbe:
-              #   httpGet:
-              #     path: "/"
-              #     port: 8000
-              #     scheme: HTTP
-              #   initialDelaySeconds: 60
-              #   timeoutSeconds: 5
-              #   periodSeconds: 30
-              #   successThreshold: 1
-              #   failureThreshold: 3
-              readinessProbe:
-                exec:
-                  command:
-                  - /bin/sh
-                  - -i
-                  - -c
-                  - /baserow/backend/docker/docker-entrypoint.sh celery-worker-healthcheck
-                failureThreshold: 3
-                initialDelaySeconds: 20
-                periodSeconds: 10
+              livenessProbe:
+                tcpSocket:
+                  port: 8000                
+                initialDelaySeconds: 90
+                timeoutSeconds: 5
+                periodSeconds: 30
                 successThreshold: 1
-                timeoutSeconds: 1  
+                failureThreshold: 3
+              readinessProbe:
+                httpGet:
+                  path: "/api/_health/"
+                  port: 8000
+                  scheme: HTTP   
+                initialDelaySeconds: 45
+                timeoutSeconds: 5
+                periodSeconds: 30
+                successThreshold: 1
+                failureThreshold: 10
               terminationMessagePath: "/dev/termination-log"
               terminationMessagePolicy: File
               imagePullPolicy: Always
@@ -170,3 +178,23 @@ objects:
           dnsPolicy: ClusterFirst
           securityContext: {}
           schedulerName: default-scheduler
+  - kind: Service
+    apiVersion: v1
+    metadata:
+      name: "${APP_NAME}-baserow-backend-wsgi"
+      labels:
+        app: "${APP_NAME}-baserow"
+      annotations: {}
+    spec:
+      ports:
+        - name: 8000-tcp
+          protocol: TCP
+          port: 8000
+          targetPort: 8000
+      selector:
+        app: "${APP_NAME}-baserow"
+        deploymentconfig: "${APP_NAME}-baserow-backend-wsgi"
+      type: ClusterIP
+      sessionAffinity: None
+    status:
+      loadBalancer: {}

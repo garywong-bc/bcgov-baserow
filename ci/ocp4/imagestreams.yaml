@@ -69,15 +69,15 @@ objects:
     metadata:
       labels:
         app: "bcgov-baserow"
-      name: "bcgov-baserow-redis"
+      name: "bcgov-baserow-web-frontend"
     spec:
       lookupPolicy:
         local: false
       tags:
-        - name: ${REDIS_TAG}
+        - name: ${BASEROW_TAG}
           from:
             kind: DockerImage
-            name: ${DOCKER_REGISTRY}/redis:${REDIS_TAG}
+            name: ${DOCKER_REGISTRY}/baserow/web-frontend:${BASEROW_TAG}
           pullSecret:
             name: docker-pull-passthru            
           referencePolicy:

@@ -1,0 +1,200 @@
+---
+    kind: Template
+    apiVersion: template.openshift.io/v1
+    message: A new Baserow export worker application has been created in your project
+    metadata:
+      name: bcgov-baserow-export-worker
+    parameters:
+      - description: The OpenShift Namespace where the ImageStream resides.
+        displayName: ImageStream Namespace
+        name: IS_NAMESPACE
+        value: "acf456-tools"
+      - description: Version of BaseRow app to be used (e.g. 1.13.0).
+        displayName: Version of BaseRow
+        name: BASEROW_TAG
+        value: "1.13.3"    
+      - description: The short-name of the Survey Service, lower-case with hyphen.
+        displayName: BaseRow Acronym
+        name: APP_NAME
+        required: true
+        value: "test"
+      - description: The disk space reserved for media uploads.
+        displayName: Media Folder size
+        name: MEDIA_FOLDER_CAPACITY
+        value: 64Mi   
+      - name: CPU_LIMIT
+        value: "200m"
+      - name: MEMORY_LIMIT
+        value: "200Mi"
+      - name: CPU_REQUEST
+        value: "50m"
+      - name: MEMORY_REQUEST
+        value: "80Mi"
+    objects:
+      - kind: PersistentVolumeClaim
+        apiVersion: v1
+        metadata:
+          name: "${APP_NAME}-baserow-app-media"
+          labels:
+            app: "${APP_NAME}-baserow"
+        spec:
+          accessModes:
+            - ReadWriteMany
+          resources:
+            requests:
+              storage: "${MEDIA_FOLDER_CAPACITY}"
+          storageClassName: netapp-file-standard
+      - kind: DeploymentConfig
+        apiVersion: v1
+        metadata:
+          name: "${APP_NAME}-baserow-export-worker"
+          generation: 1
+          labels:
+            app: "${APP_NAME}-baserow"
+          annotations: {}
+        spec:
+          strategy:
+            type: Rolling
+            rollingParams:
+              updatePeriodSeconds: 1
+              intervalSeconds: 1
+              timeoutSeconds: 600
+              maxUnavailable: 25%
+              maxSurge: 25%
+            resources: {}
+            activeDeadlineSeconds: 21600
+          triggers:
+            - type: ConfigChange
+            - type: ImageChange
+              imageChangeParams:
+                automatic: true
+                containerNames:
+                  - "${APP_NAME}-baserow-export-worker"
+                from:
+                  kind: ImageStreamTag
+                  namespace: ${IS_NAMESPACE}
+                  name: bcgov-baserow-backend:${BASEROW_TAG}
+          replicas: 1
+          revisionHistoryLimit: 10
+          test: false
+          selector:
+            app: "${APP_NAME}-baserow"
+            deploymentconfig: "${APP_NAME}-baserow-export-worker"
+          template:
+            metadata:
+              labels:
+                app: "${APP_NAME}-baserow"
+                deploymentconfig: "${APP_NAME}-baserow-export-worker"
+              annotations: {}
+            spec:
+              volumes:
+                - name: "${APP_NAME}-baserow-app-media"
+                  persistentVolumeClaim:
+                    claimName: "${APP_NAME}-baserow-app-media"
+              containers:
+                - name: "${APP_NAME}-baserow-export-worker"
+                  image: " "
+                  workingDir: /baserow   
+                  args:
+                  - "celery-exportworker"
+                  ports:
+                    - containerPort: 8000
+                      protocol: TCP
+                  envFrom:
+                    - configMapRef:
+                        name: "${APP_NAME}-baserow-configmap"                  
+                  env:
+                    - name: SECRET_KEY
+                      valueFrom:
+                        secretKeyRef:
+                          name: "${APP_NAME}-baserow-secret"
+                          key: secret-key
+                    - name: BASEROW_JWT_SIGNING_KEY
+                      valueFrom:
+                        secretKeyRef:
+                          name: "${APP_NAME}-baserow-secret"
+                          key: baserow-jwt-signing-key
+                    - name: REDIS_PASSWORD
+                      valueFrom:
+                        secretKeyRef:
+                          name: "${APP_NAME}-baserow-redis"
+                          key: redis-password
+                    - name: REDIS_HOST
+                      value: "${APP_NAME}-baserow-redis"        
+                    - name: DATABASE_USER
+                      valueFrom:
+                        secretKeyRef:
+                          name: "${APP_NAME}-baserow-postgresql"
+                          key: database-user
+                    - name: DATABASE_PASSWORD
+                      valueFrom:
+                        secretKeyRef:
+                          name: "${APP_NAME}-baserow-postgresql"
+                          key: database-password
+                    - name: DATABASE_NAME
+                      valueFrom:
+                        secretKeyRef:
+                          name: "${APP_NAME}-baserow-postgresql"
+                          key: database-name
+                    - name: DATABASE_HOST
+                      value: "${APP_NAME}-baserow-postgresql"
+                    - name: DATABASE_PORT
+                      value: "5432"
+                  resources:
+                    limits:
+                      cpu: "${CPU_LIMIT}"
+                      memory: "${MEMORY_LIMIT}"
+                    requests:
+                      cpu: "${CPU_REQUEST}"
+                      memory: "${MEMORY_REQUEST}"
+                  volumeMounts:
+                    - name: "${APP_NAME}-baserow-app-media"
+                      mountPath: "/baserow/media"
+                  livenessProbe:
+                    tcpSocket:
+                      port: 8000                
+                    initialDelaySeconds: 90
+                    timeoutSeconds: 5
+                    periodSeconds: 30
+                    successThreshold: 1
+                    failureThreshold: 3
+                  readinessProbe:
+                    exec:
+                      command:
+                      - /bin/sh
+                      - -i
+                      - -c
+                      - "/baserow/backend/docker/docker-entrypoint.sh celery-exportworker-healthcheck"
+                    initialDelaySeconds: 45
+                    timeoutSeconds: 5
+                    periodSeconds: 30
+                    successThreshold: 1
+                    failureThreshold: 10
+                  terminationMessagePath: "/dev/termination-log"
+                  terminationMessagePolicy: File
+                  imagePullPolicy: Always
+              restartPolicy: Always
+              terminationGracePeriodSeconds: 30
+              dnsPolicy: ClusterFirst
+              securityContext: {}
+              schedulerName: default-scheduler
+      # - kind: Service
+      #   apiVersion: v1
+      #   metadata:
+      #     name: "${APP_NAME}-baserow-export-worker"
+      #     labels:
+      #       app: "${APP_NAME}-baserow"
+      #     annotations: {}
+      #   spec:
+      #     ports:
+      #       - name: 8000-tcp
+      #         protocol: TCP
+      #         port: 8000
+      #         targetPort: 8000
+      #     selector:
+      #       app: "${APP_NAME}-baserow"
+      #       deploymentconfig: "${APP_NAME}-baserow-export-worker"
+      #     type: ClusterIP
+      #     sessionAffinity: None
+      #   status:
+      #     loadBalancer: {}
